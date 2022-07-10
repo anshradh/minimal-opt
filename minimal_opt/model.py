@@ -109,12 +109,14 @@ class OPTModel(nn.Module):
         self.embed_tokens = EmbeddingNoInit(
             num_embeddings=config.vocab_size,
             embedding_dim=config.hidden_size,
-            device=device, dtype=torch.float16,
+            device=device,
+            dtype=torch.float16,
         )
         self.embed_positions = LearnedPositionalEmbedding(
             num_embeddings=config.max_position_embeddings,
             embedding_dim=config.hidden_size,
-            device=device, dtype=torch.float16,
+            device=device,
+            dtype=torch.float16,
         )
         self.layer_list = nn.ModuleList([])
         for layer_i in range(config.num_hidden_layers):
@@ -125,7 +127,9 @@ class OPTModel(nn.Module):
             dtype=torch.float16,
         )
         self.logits_out = LinearNoInit(
-            config.hidden_size, config.vocab_size, bias=False,
+            config.hidden_size,
+            config.vocab_size,
+            bias=False,
             device=device,
             dtype=torch.float16,
         )
@@ -147,7 +151,7 @@ class OPTModel(nn.Module):
                 kv_length = input_ids.shape[1]
             else:
                 kv_length = layer_past[0].shape[1] + 1
-            attention_mask = attention_mask[..., :input_ids.shape[1], :kv_length]
+            attention_mask = attention_mask[..., : input_ids.shape[1], :kv_length]
 
         if layer_past is None:
             layer_past = [None] * len(self.layer_list)
@@ -182,34 +186,43 @@ class PPOPTModel(OPTModel):
         if device_list:
             self.device_list = device_list
         else:
-            all_devices = [torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())]
-            layers_per_device = math.ceil((self.config.num_hidden_layers + 2) / len(all_devices))
+            all_devices = [
+                torch.device(f"cuda:{i}") for i in range(torch.cuda.device_count())
+            ]
+            layers_per_device = math.ceil(
+                (self.config.num_hidden_layers + 2) / len(all_devices)
+            )
             self.device_list = [
-                device
-                for device in all_devices
-                for _ in range(layers_per_device)
+                device for device in all_devices for _ in range(layers_per_device)
             ]
         self.embed_tokens = EmbeddingNoInit(
             num_embeddings=config.vocab_size,
             embedding_dim=config.hidden_size,
-            device=self.device_list[0], dtype=torch.float16,
+            device=self.device_list[0],
+            dtype=torch.float16,
         )
         self.embed_positions = LearnedPositionalEmbedding(
             num_embeddings=config.max_position_embeddings,
             embedding_dim=config.hidden_size,
-            device=self.device_list[0], dtype=torch.float16,
+            device=self.device_list[0],
+            dtype=torch.float16,
         )
         self.layer_list = nn.ModuleList([])
         for layer_i in range(config.num_hidden_layers):
-            self.layer_list.append(TransformerLayer(
-                config, use_cache, device=self.device_list[layer_i + 1]))
+            self.layer_list.append(
+                TransformerLayer(
+                    config, use_cache, device=self.device_list[layer_i + 1]
+                )
+            )
         self.final_layernorm = LayerNormNoInit(
             config.hidden_size,
             device=self.device_list[config.num_hidden_layers + 1],
             dtype=torch.float16,
         )
         self.logits_out = LinearNoInit(
-            config.hidden_size, config.vocab_size, bias=False,
+            config.hidden_size,
+            config.vocab_size,
+            bias=False,
             device=self.device_list[0],
             dtype=torch.float16,
         )
@@ -223,7 +236,7 @@ class PPOPTModel(OPTModel):
                 kv_length = input_ids.shape[1]
             else:
                 kv_length = layer_past[0].shape[1] + 1
-            attention_mask = attention_mask[..., :input_ids.shape[1], :kv_length]
+            attention_mask = attention_mask[..., : input_ids.shape[1], :kv_length]
 
         if layer_past is None:
             layer_past = [None] * len(self.layer_list)
@@ -243,7 +256,9 @@ class PPOPTModel(OPTModel):
             )
             kv_cache_list.append(kv_cache)
         hidden_states = self.post_transformer_transpose(hidden_states)
-        hidden_states = hidden_states.to(self.device_list[self.config.num_hidden_layers + 1])
+        hidden_states = hidden_states.to(
+            self.device_list[self.config.num_hidden_layers + 1]
+        )
         hidden_states = self.final_layernorm(hidden_states)
 
         hidden_states = hidden_states.to(self.device_list[0])
@@ -260,7 +275,9 @@ class SelfAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.use_cache = use_cache
         self.num_attention_heads = config.num_attention_heads
-        self.hidden_size_per_attention_head = config.hidden_size // config.num_attention_heads
+        self.hidden_size_per_attention_head = (
+            config.hidden_size // config.num_attention_heads
+        )
         self.norm_factor = math.sqrt(self.hidden_size_per_attention_head)
         self.q_proj = LinearNoInit(
             config.hidden_size,
@@ -293,21 +310,32 @@ class SelfAttention(nn.Module):
 
         # [sq, b, np, hn]
         query_layer = self.q_proj(hidden_states).reshape(
-            q_seq_len, batch_size, self.num_attention_heads, self.hidden_size_per_attention_head
+            q_seq_len,
+            batch_size,
+            self.num_attention_heads,
+            self.hidden_size_per_attention_head,
         )
         query_layer /= self.norm_factor
         key_layer = self.k_proj(hidden_states).reshape(
-            q_seq_len, batch_size, self.num_attention_heads, self.hidden_size_per_attention_head
+            q_seq_len,
+            batch_size,
+            self.num_attention_heads,
+            self.hidden_size_per_attention_head,
         )
         value_layer = self.v_proj(hidden_states).reshape(
-            q_seq_len, batch_size, self.num_attention_heads, self.hidden_size_per_attention_head
+            q_seq_len,
+            batch_size,
+            self.num_attention_heads,
+            self.hidden_size_per_attention_head,
         )
 
         # Cache QKV values
         if has_layer_past:
             past_key, past_value = layer_past
             key_layer = torch.cat((past_key.type_as(key_layer), key_layer), dim=0)
-            value_layer = torch.cat((past_value.type_as(value_layer), value_layer), dim=0)
+            value_layer = torch.cat(
+                (past_value.type_as(value_layer), value_layer), dim=0
+            )
         if self.use_cache:
             kv_cache = torch.stack((key_layer, value_layer))
         else:
@@ -319,14 +347,17 @@ class SelfAttention(nn.Module):
             query_layer, key_layer, value_layer, attention_mask
         )
 
-        # [b, np, sq, hn] --> [sq, b, np, hn]
-        context_layer = context_layer.permute(2, 0, 1, 3).contiguous()
+        # # [b, np, sq, hn] --> [sq, b, np, hn]
+        # context_layer = context_layer.permute(2, 0, 1, 3).contiguous()
 
-        # [sq, b, np, hn] --> [sq, b, hp]
-        new_context_layer_shape = context_layer.size()[:-2] + (
-            self.hidden_size,
-        )
-        context_layer = context_layer.view(*new_context_layer_shape)
+        # # [sq, b, np, hn] --> [sq, b, hp]
+        # new_context_layer_shape = context_layer.size()[:-2] + (
+        #     self.hidden_size,
+        # )
+        # context_layer = context_layer.view(*new_context_layer_shape)
+
+        # [b, np, sq, hn] --> [sq, b, hp]
+        context_layer = rearrange(context_layer, "b np sq hn -> sq b (np hn)")
 
         # =================
         # Output. [sq, b, h]
@@ -351,9 +382,7 @@ class SelfAttention(nn.Module):
 
         # [sq, b, np, hn] -> [sq, b * np, hn]
         query_layer = query_layer.view(
-            output_size[2],
-            output_size[0] * output_size[1],
-            -1
+            output_size[2], output_size[0] * output_size[1], -1
         )
         key_layer = key_layer.view(
             output_size[3],
@@ -391,11 +420,15 @@ class SelfAttention(nn.Module):
         # ===========================
 
         # attention scores and attention mask [b, np, sq, sk]
-        masked_scores = attention_mask_func(attention_scores, attention_mask) \
-            if attention_mask is not None else attention_scores
+        masked_scores = (
+            attention_mask_func(attention_scores, attention_mask)
+            if attention_mask is not None
+            else attention_scores
+        )
         # noinspection PyTypeChecker
         attention_probs = nn.functional.softmax(
-            masked_scores, dim=-1, dtype=torch.float32).to(masked_scores.dtype)
+            masked_scores, dim=-1, dtype=torch.float32
+        ).to(masked_scores.dtype)
 
         # =========================
         # Context layer. [sq, b, hp]
@@ -433,8 +466,12 @@ class SelfAttention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, config: OPTConfig, device=None):
         super().__init__()
-        self.dense_h_to_4h = LinearNoInit(config.hidden_size, config.ffn_dim, device=device, dtype=torch.float16)
-        self.dense_4h_to_h = LinearNoInit(config.ffn_dim, config.hidden_size, device=device, dtype=torch.float16)
+        self.dense_h_to_4h = LinearNoInit(
+            config.hidden_size, config.ffn_dim, device=device, dtype=torch.float16
+        )
+        self.dense_4h_to_h = LinearNoInit(
+            config.ffn_dim, config.hidden_size, device=device, dtype=torch.float16
+        )
 
     def forward(self, hidden_states):
         hidden_states_shape = hidden_states.shape
@@ -495,8 +532,14 @@ class LinearNoInit(nn.Linear):
 
 
 class LearnedPositionalEmbedding(EmbeddingNoInit):
-    def __init__(self, num_embeddings: int, embedding_dim: int, magic_offset=2,
-                 device=None, dtype=None):
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        magic_offset=2,
+        device=None,
+        dtype=None,
+    ):
         self.magic_offset = magic_offset
         super().__init__(num_embeddings, embedding_dim, device=device, dtype=dtype)
 
@@ -506,13 +549,19 @@ class LearnedPositionalEmbedding(EmbeddingNoInit):
         # positions = (torch.cumsum(attention_mask, dim=1).type_as(attention_mask) * attention_mask).long() - 1
         batch_size, seq_len, _ = token_embeddings.shape
         if kv_cache is None or kv_cache[0] is None:
-            positions = torch.arange(seq_len, device=token_embeddings.device)[None].expand(
-                batch_size, -1,
+            positions = torch.arange(seq_len, device=token_embeddings.device)[
+                None
+            ].expand(
+                batch_size,
+                -1,
             )
         else:
             kv_cache_len = kv_cache[0].shape[1]
-            positions = torch.arange(kv_cache_len + seq_len, device=token_embeddings.device)[None].expand(
-                batch_size, -1,
+            positions = torch.arange(
+                kv_cache_len + seq_len, device=token_embeddings.device
+            )[None].expand(
+                batch_size,
+                -1,
             )
             positions = positions[:, kv_cache_len:]
 
@@ -525,5 +574,7 @@ def generate_mask(seq_len):
 
 def attention_mask_func(attention_scores, ltor_mask):
     """Assign dtype minimum to False cells in ltor_mask"""
-    attention_scores.masked_fill_(~ltor_mask, torch.tensor(torch.finfo(torch.float16).min))
+    attention_scores.masked_fill_(
+        ~ltor_mask, torch.tensor(torch.finfo(torch.float16).min)
+    )
     return attention_scores
